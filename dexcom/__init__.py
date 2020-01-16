@@ -154,8 +154,8 @@ def auth(refresh=False):
 
         response = input(
             "Please go to the following URL, and log into your Dexcom account. "
-            "After logging in, you will be redirected to an error page. Please "
-            "paste the URL of that error page into the terminal. Note that the "
+            "After logging in, you will be redirected. Please "
+            "paste the URL of that redirect into the terminal. Note that the "
             f"url will expire after one minute.\n\n{auth_url}\n\nPaste here: "
         )
         auth_code = response.strip().partition("code=")[2]
@@ -189,7 +189,3 @@ def auth(refresh=False):
         log.exception(f"Unable to dump tokens to token_file {tokens_file}")
 
     return (access_token, refresh_token, expires)
-
-
-if __name__ == "__main__":
-    run()
