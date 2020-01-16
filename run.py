@@ -1,3 +1,6 @@
 import dexcom
 
-dexcom.run()
+try:
+    dexcom.run()
+except KeyboardInterrupt:
+    pass

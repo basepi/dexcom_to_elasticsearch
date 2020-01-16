@@ -6,10 +6,16 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timedelta
+
+import elasticsearch
+import elasticsearch.helpers
 
 import dexcom.settings as settings
 
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
+timestr = "%Y-%m-%dT%H:%M:%S"
 
 
 def run():
@@ -20,6 +26,8 @@ def run():
     refresh_token = None
     expires = 0
     tokens_file = settings.tokens_file
+    cursor_file = settings.cursor_file
+    cursor = datetime.fromtimestamp(0)
     if os.path.isfile(tokens_file):
         try:
             with open(tokens_file, "r") as f:
@@ -33,13 +41,98 @@ def run():
     if not access_token or not refresh_token:
         access_token, refresh_token, expires = auth()
 
+    # Set up elasticsearch
+    es_endpoints = settings.es_endpoints
+    es_user = settings.es_user
+    es_password = settings.es_password
+    es_index = settings.es_index
+    es = elasticsearch.Elasticsearch(es_endpoints, http_auth=(es_user, es_password), scheme="https", port=443)
+
+    # Check for previous cursor
+    earliest_egv = None
+    latest_egv = None
+    if os.path.isfile(cursor_file):
+        try:
+            with open(cursor_file, "r") as f:
+                cursor = datetime.strptime(f.read().strip(), timestr)
+        except:
+            pass
+
     while True:
+        # Check if we need a new token
         if time.time() > expires:
             access_token, refresh_token, expires = auth(refresh=refresh_token)
 
-        time.sleep(10)
+        if not earliest_egv or cursor > latest_egv:
+            # Get dataranges for the user
+            conn = http.client.HTTPSConnection("api.dexcom.com")
+            headers = {"authorization": f"Bearer {access_token}"}
+            conn.request("GET", "/v2/users/self/dataRange", headers=headers)
+            response = conn.getresponse()
+            data = json.loads(response.read().decode("utf-8"))
+            conn.close()
 
-    print(f"We have tokens!")
+            earliest_egv = datetime.strptime(data["egvs"]["start"]["systemTime"], timestr)
+            latest_egv = datetime.strptime(data["egvs"]["end"]["systemTime"], timestr)
+
+        if earliest_egv > cursor:
+            cursor = earliest_egv
+        elif cursor > latest_egv:
+            # We've fetched all the records, sleep for 5 minutes
+            log.info("No new records found. Sleeping for 5 minutes.")
+            time.sleep(300)
+            continue
+
+        # Fetch an hour of estimated glucose values (egv)
+        finish = cursor + timedelta(hours=1)
+
+        startstr = cursor.strftime(timestr)
+        finishstr = finish.strftime(timestr)
+
+        conn = http.client.HTTPSConnection("api.dexcom.com")
+        headers = {"authorization": f"Bearer {access_token}"}
+        conn.request("GET", f"/v2/users/self/egvs?startDate={startstr}&endDate={finishstr}", headers=headers)
+        response = conn.getresponse()
+        data = json.loads(response.read().decode("utf-8"))
+        conn.close()
+
+        data = format_data(data, es_index) if data else {}
+        elasticsearch.helpers.bulk(es, data)
+
+        log.info(f"Indexed {len(data)} records from {startstr} to {finishstr}")
+
+        # Record the time of the newest EGV we have (they are sorted from newest to oldest)
+        last_egv = datetime.strptime(data[0]["_source"]["@timestamp"], timestr)
+        # Update the cursor to one second past our last indexed event
+        cursor = last_egv + timedelta(seconds=1)
+
+        # Store the cursor in case we get interrupted
+        with open(cursor_file, "w") as f:
+            f.write(cursor.strftime(timestr))
+
+        time.sleep(1)
+
+
+def format_data(data, es_index):
+    """
+    Format data for bulk indexing into elasticsearch
+    """
+    unit = data["unit"]
+    rate_unit = data["rateUnit"]
+    egvs = data["egvs"]
+    docs = []
+
+    for record in egvs:
+        record["unit"] = unit
+        record["rate_unit"] = rate_unit
+        record["@timestamp"] = record.pop("systemTime")
+        record.pop("displayTime")
+        record["realtime_value"] = record.pop("realtimeValue")
+        record["smoothed_value"] = record.pop("smoothedValue")
+        record["trend_rate"] = record.pop("trendRate")
+        docs.append({"_index": es_index, "_type": "document", "_source": record})
+
+    return docs
 
 
 def auth(refresh=False):
