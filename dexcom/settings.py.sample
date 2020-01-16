@@ -1,0 +1,13 @@
+# Dexcom stuff
+tokens_file = "./tokens"
+cursor_file = "./cursor"
+client_id = ""
+client_secret = ""
+redirect_uri = ""
+base_url = "https://api.dexcom.com"
+
+# Elasticsearch stuff
+es_user = ""
+es_password = ""
+es_endpoints = ["host1", "host2"]
+es_index = "dexcom_egvs"
