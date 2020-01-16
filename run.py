@@ -1,0 +1,3 @@
+import dexcom
+
+dexcom.run()
