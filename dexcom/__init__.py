@@ -16,6 +16,7 @@ import dexcom.settings as settings
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 timestr = "%Y-%m-%dT%H:%M:%S"
+time_window = timedelta(hours=1)
 
 
 def run():
@@ -84,7 +85,7 @@ def run():
             continue
 
         # Fetch an hour of estimated glucose values (egv)
-        finish = cursor + timedelta(hours=1)
+        finish = cursor + time_window
 
         startstr = cursor.strftime(timestr)
         finishstr = finish.strftime(timestr)
@@ -102,9 +103,15 @@ def run():
         log.info(f"Indexed {len(data)} records from {startstr} to {finishstr}")
 
         # Record the time of the newest EGV we have (they are sorted from newest to oldest)
-        last_egv = datetime.strptime(data[0]["_source"]["@timestamp"], timestr)
-        # Update the cursor to one second past our last indexed event
-        cursor = last_egv + timedelta(seconds=1)
+        if data:
+            last_egv = datetime.strptime(data[0]["_source"]["@timestamp"], timestr)
+            # Update the cursor to one second past our last indexed event
+            cursor = last_egv + timedelta(seconds=1)
+        elif finish < latest_egv:
+            # No events in this window (and more events after this window),
+            # likely due to sensor change.
+            last_egv = finish
+            cursor = finish
 
         # Store the cursor in case we get interrupted
         with open(cursor_file, "w") as f:
