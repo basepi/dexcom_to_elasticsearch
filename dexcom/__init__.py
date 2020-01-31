@@ -73,8 +73,9 @@ def run():
             data = json.loads(response.read().decode("utf-8"))
             conn.close()
 
-            earliest_egv = datetime.strptime(data["egvs"]["start"]["systemTime"], timestr)
-            latest_egv = datetime.strptime(data["egvs"]["end"]["systemTime"], timestr)
+            # Sometimes egv can have a decimal on the seconds. Throw it away.
+            earliest_egv = datetime.strptime(data["egvs"]["start"]["systemTime"].split(".", 1)[0], timestr)
+            latest_egv = datetime.strptime(data["egvs"]["end"]["systemTime"].split(".", 1)[0], timestr)
 
         if earliest_egv > cursor:
             cursor = earliest_egv
@@ -117,7 +118,7 @@ def run():
         with open(cursor_file, "w") as f:
             f.write(cursor.strftime(timestr))
 
-        time.sleep(1)
+        time.sleep(0.1)
 
 
 def format_data(data, es_index):
