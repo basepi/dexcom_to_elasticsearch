@@ -99,19 +99,28 @@ def run():
         conn.close()
 
         data = format_data(data, es_index) if data else {}
-        elasticsearch.helpers.bulk(es, data)
 
-        log.info(f"Indexed {len(data)} records from {startstr} to {finishstr}")
-
-        # Record the time of the newest EGV we have (they are sorted from newest to oldest)
         if data:
+            # Bulk send to elasticsearch
+            elasticsearch.helpers.bulk(es, data)
+            log.info(f"Indexed {len(data)} records from {startstr} to {finishstr}")
+
+            # Record the time of the newest EGV we have (they are sorted from newest to oldest)
             last_egv = datetime.strptime(data[0]["_source"]["@timestamp"], timestr)
             # Update the cursor to one second past our last indexed event
             cursor = last_egv + timedelta(seconds=1)
-        elif finish < latest_egv:
-            # No events in this window (and more events after this window),
-            # likely due to sensor change.
-            last_egv = finish
+
+        # We can skip ahead if the window was empty but there are already more
+        # events post-window
+        if finish < latest_egv:
+            if not data:
+                # No events in this window (and more events after this window),
+                # likely due to sensor change.
+                log.info(
+                    "No events in the time window, but more events after. "
+                    "This is likely due to a sensor change or malfunction. "
+                    "Skipping time window."
+                )
             cursor = finish
 
         # Store the cursor in case we get interrupted
