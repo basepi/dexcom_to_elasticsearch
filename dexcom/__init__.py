@@ -73,6 +73,7 @@ def run():
                 response = conn.getresponse()
             except ConnectionError as e:
                 log.error(f"Received a connection error from datarange endpoint: {e}")
+                time.sleep(5)
                 continue
             data = json.loads(response.read().decode("utf-8"))
             conn.close()
@@ -102,6 +103,7 @@ def run():
             response = conn.getresponse()
         except ConnectionError as e:
             log.error(f"Received a ConnectionResetError querying egvs: {e}")
+            time.sleep(5)
             continue
         data = json.loads(response.read().decode("utf-8"))
         conn.close()
