@@ -68,8 +68,12 @@ def run():
             # Get dataranges for the user
             conn = http.client.HTTPSConnection("api.dexcom.com")
             headers = {"authorization": f"Bearer {access_token}"}
-            conn.request("GET", "/v2/users/self/dataRange", headers=headers)
-            response = conn.getresponse()
+            try:
+                conn.request("GET", "/v2/users/self/dataRange", headers=headers)
+                response = conn.getresponse()
+            except ConnectionError as e:
+                log.error(f"Received a connection error from datarange endpoint: {e}")
+                continue
             data = json.loads(response.read().decode("utf-8"))
             conn.close()
 
@@ -93,8 +97,12 @@ def run():
 
         conn = http.client.HTTPSConnection("api.dexcom.com")
         headers = {"authorization": f"Bearer {access_token}"}
-        conn.request("GET", f"/v2/users/self/egvs?startDate={startstr}&endDate={finishstr}", headers=headers)
-        response = conn.getresponse()
+        try:
+            conn.request("GET", f"/v2/users/self/egvs?startDate={startstr}&endDate={finishstr}", headers=headers)
+            response = conn.getresponse()
+        except ConnectionError as e:
+            log.error(f"Received a ConnectionResetError querying egvs: {e}")
+            continue
         data = json.loads(response.read().decode("utf-8"))
         conn.close()
 
