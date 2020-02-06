@@ -1,7 +1,6 @@
 """
 Simple connector between Dexcom's developer API and elasticsearch
 """
-import http.client
 import json
 import logging
 import os
@@ -10,6 +9,7 @@ from datetime import datetime, timedelta
 
 import elasticsearch
 import elasticsearch.helpers
+import requests
 
 import dexcom.settings as settings
 
@@ -28,6 +28,7 @@ def run():
     expires = 0
     tokens_file = settings.tokens_file
     cursor_file = settings.cursor_file
+    base_url = settings.base_url
     cursor = datetime.fromtimestamp(0)
     if os.path.isfile(tokens_file):
         try:
@@ -66,17 +67,15 @@ def run():
 
         if not earliest_egv or cursor > latest_egv:
             # Get dataranges for the user
-            conn = http.client.HTTPSConnection("api.dexcom.com")
-            headers = {"authorization": f"Bearer {access_token}"}
             try:
-                conn.request("GET", "/v2/users/self/dataRange", headers=headers)
-                response = conn.getresponse()
+                headers = {"authorization": f"Bearer {access_token}"}
+                r = requests.get(base_url + "/v2/users/self/dataRange", headers=headers)
+                r.raise_for_status()
+                data = r.json()
             except ConnectionError as e:
                 log.error(f"Received a connection error from datarange endpoint: {e}")
                 time.sleep(5)
                 continue
-            data = json.loads(response.read().decode("utf-8"))
-            conn.close()
 
             # Sometimes egv can have a decimal on the seconds. Throw it away.
             earliest_egv = datetime.strptime(data["egvs"]["start"]["systemTime"].split(".", 1)[0], timestr)
@@ -96,17 +95,17 @@ def run():
         startstr = cursor.strftime(timestr)
         finishstr = finish.strftime(timestr)
 
-        conn = http.client.HTTPSConnection("api.dexcom.com")
-        headers = {"authorization": f"Bearer {access_token}"}
         try:
-            conn.request("GET", f"/v2/users/self/egvs?startDate={startstr}&endDate={finishstr}", headers=headers)
-            response = conn.getresponse()
+            headers = {"authorization": f"Bearer {access_token}"}
+            r = requests.get(
+                base_url + f"/v2/users/self/egvs?startDate={startstr}&endDate={finishstr}", headers=headers
+            )
+            r.raise_for_status()
+            data = r.json()
         except ConnectionError as e:
             log.error(f"Received a ConnectionResetError querying egvs: {e}")
             time.sleep(5)
             continue
-        data = json.loads(response.read().decode("utf-8"))
-        conn.close()
 
         data = format_data(data, es_index) if data else {}
 
@@ -187,22 +186,18 @@ def auth(refresh=False):
         )
         auth_code = response.strip().partition("code=")[2]
 
-        conn = http.client.HTTPSConnection("api.dexcom.com")
         payload = f"client_secret={client_secret}&client_id={client_id}&code={auth_code}&grant_type=authorization_code&redirect_uri={redirect_uri}"  # noqa: E501
         headers = {"content-type": "application/x-www-form-urlencoded", "cache-control": "no-cache"}
-        conn.request("POST", "/v2/oauth2/token", payload, headers)
-        response = conn.getresponse()
-        data = json.loads(response.read().decode("utf-8"))
-        conn.close()
+        r = requests.post(base_url + "/v2/oauth2/token", params=payload, headers=headers)
+        r.raise_for_status()
+        data = r.json()
     else:
         log.info("Refreshing token.")
-        conn = http.client.HTTPSConnection("api.dexcom.com")
         payload = f"client_secret={client_secret}&client_id={client_id}&refresh_token={refresh}&grant_type=refresh_token&redirect_uri={redirect_uri}"  # noqa: E501
         headers = {"content-type": "application/x-www-form-urlencoded", "cache-control": "no-cache"}
-        conn.request("POST", "/v2/oauth2/token", payload, headers)
-        response = conn.getresponse()
-        data = json.loads(response.read().decode("utf-8"))
-        conn.close()
+        r = requests.post(base_url + "/v2/oauth2/token", params=payload, headers=headers)
+        r.raise_for_status()
+        data = r.json()
 
     access_token = data["access_token"]
     refresh_token = data["refresh_token"]
